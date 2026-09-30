@@ -267,6 +267,15 @@ const ADAPT_CSS: readonly string[] = [
   // title row keeps its own layout and React keeps owning the node) and
   // painted over the tabs row by the transform alignActionsText computes.
   `body.${HEADER_SEATED_CLASS} [class$="_header"] [class$="_titleCluster"] [class$="_headerActions"]{position:absolute;left:0;top:0;margin:0;display:flex;align-items:center;gap:6px;flex:none;z-index:2}`,
+  // v81: a third-party action row such as dsh-session-manager's `.sm-header`
+  // (archive / pin / labels / move / delete) is much wider than the chips the
+  // seat above was measured against. Left in the title row — exactly like
+  // desktop — it takes the full cluster width and wraps into a compact bar;
+  // the buttons are tightened so that bar stays shallow on a phone.
+  `body.${ACTIVE_CLASS} [class$="_titleCluster"]:has(.sm-header){flex-wrap:wrap;row-gap:4px}`,
+  `body.${ACTIVE_CLASS} [class$="_titleCluster"] [class$="_headerActions"]:has(.sm-header){flex:1 0 100%;max-width:100%;min-width:0;flex-wrap:wrap;justify-content:flex-start;row-gap:4px}`,
+  `body.${ACTIVE_CLASS} .sm-header{flex-wrap:wrap;justify-content:flex-start;max-width:100%;min-width:0;row-gap:4px}`,
+  `body.${ACTIVE_CLASS} .sm-headerBtn{min-height:26px;padding:2px 7px;font-size:12px;line-height:16px;gap:4px;border-radius:6px}`,
   // v70: match the tab text size with the seated mode label (12px); NB
   // [class$="_tab"] misses the active tab (its class ends in "_tabActive")
   // — containment so BOTH tabs match.
@@ -920,6 +929,24 @@ export function startMobileAdapt(): void {
   // stale seated copies are removed first. The original spot is only hidden
   // while a seat actually exists: the tabs row renders only for multi-tab
   // sessions, and hiding the actions without a seat target made them vanish.
+  // v81: the seat only fits the stock chips it was measured against (the
+  // agent-preset label and the background-task badge). A third-party action row
+  // — dsh-session-manager injects `.sm-header` with archive / pin / labels /
+  // move / delete — is several buttons wide: seated, its offsetParent resolves
+  // to the app root instead of the title cluster, so it landed below the
+  // header and floated over the message stream, while its reserve squeezed the
+  // tabs row down to a few pixels. Such rows keep the desktop seat instead.
+  function holdsBulkyActionRow(actions: Element | null): boolean {
+    return actions !== null && actions.querySelector('.sm-header') !== null
+  }
+
+  function clearSeatOffsets(actions: Element | null): void {
+    if (actions instanceof HTMLElement && actions.style.transform !== '') actions.style.transform = ''
+    if (document.documentElement.style.getPropertyValue(HEADER_RESERVE_VAR) !== '') {
+      document.documentElement.style.removeProperty(HEADER_RESERVE_VAR)
+    }
+  }
+
   function seatHeaderActions(): void {
     if (!active) return
     const header = nodeOf('[class$="_header"]')
@@ -931,8 +958,9 @@ export function startMobileAdapt(): void {
     // child of the recorded parent (a NotFoundError in the commit phase). The
     // injected CSS takes it out of flow and the transform below paints it over
     // the tabs row instead.
-    const seated = header !== null && tabs !== null && actions !== null
+    const seated = header !== null && tabs !== null && actions !== null && !holdsBulkyActionRow(actions)
     document.body.classList.toggle(HEADER_SEATED_CLASS, seated)
+    if (!seated) clearSeatOffsets(actions)
     ensureHeaderObserver(seated ? header : null)
   }
 
@@ -949,6 +977,13 @@ export function startMobileAdapt(): void {
     const tabs = header.querySelector('[class$="_tabs"]')
     const actions = header.querySelector('[class$="_titleCluster"] [class$="_headerActions"]')
     if (tabs === null || actions === null || !(tabs instanceof HTMLElement) || !(actions instanceof HTMLElement)) return
+    // v81: a bulky third-party row keeps the desktop seat, so it must never
+    // carry a painted transform or publish a reserve the tabs row would cap
+    // itself against.
+    if (holdsBulkyActionRow(actions)) {
+      clearSeatOffsets(actions)
+      return
+    }
     if (!headerGeometryDirty) return
     headerGeometryDirty = false
     const tabBtn = tabs.querySelector(':scope > [class*="_tab"]')

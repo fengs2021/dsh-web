@@ -456,6 +456,64 @@ describe('startMobileAdapt', () => {
     expect(document.body.classList.contains('dsh-remote-header-seated')).toBe(false)
   })
 
+  it('user with a third-party action row keeps it in the title row instead of seated', async () => {
+    // Given a portrait coarse-pointer viewport
+    media.portrait = true
+    media.coarse = true
+    setWidth(390)
+    const start = await freshStart()
+
+    // When the adaptation layer meets the stock seat geometry (a header with a
+    // tabs row and an actions slot) holding a wide third-party row —
+    // dsh-session-manager injects `.sm-header`, six buttons from archive to
+    // delete — which is far wider than the chips the seat was measured against
+    start()
+    const header = document.createElement('div')
+    header.className = 'chat_header'
+    const cluster = document.createElement('div')
+    cluster.className = 'chat_titleCluster'
+    const actions = document.createElement('div')
+    actions.className = 'chat_headerActions'
+    const row = document.createElement('div')
+    row.className = 'sm-header'
+    actions.appendChild(row)
+    cluster.appendChild(actions)
+    const tabs = document.createElement('div')
+    tabs.className = 'chat_tabs'
+    tabs.innerHTML = '<button class="chat_tab">Chat</button>'
+    header.append(cluster, tabs)
+    document.body.appendChild(header)
+
+    // Then the row keeps the desktop seat: it stays where React owns it, with
+    // no body class, no painted transform, and no reserve for the tabs row to
+    // cap itself against — seated, its absolute box resolved against the app
+    // root and landed below the header over the message stream
+    await vi.waitFor(() => { expect(actions.parentElement).toBe(cluster) })
+    expect(document.body.classList.contains('dsh-remote-header-seated')).toBe(false)
+    expect(actions.style.transform).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--dsh-remote-header-actions-reserve')).toBe('')
+  })
+
+  it('user gets the compact action-row rules scoped to a slot that holds one', async () => {
+    // Given a portrait coarse-pointer viewport
+    media.portrait = true
+    media.coarse = true
+    setWidth(390)
+    const start = await freshStart()
+
+    // When the adaptation layer installs
+    start()
+    const css = document.querySelector('style[data-plugin-css="dsh-remote-web-ui/mobile-adapt.css"]')?.textContent ?? ''
+
+    // Then the wrap and the tightened buttons gate on :has(.sm-header), so the
+    // official chips (the mode label and the badge) keep the layout the seat
+    // was measured against
+    expect(css).toContain('[class$="_titleCluster"]:has(.sm-header){flex-wrap:wrap;row-gap:4px}')
+    expect(css).toContain('[class$="_headerActions"]:has(.sm-header){flex:1 0 100%')
+    expect(css).toContain('.sm-headerBtn{min-height:26px;padding:2px 7px;font-size:12px')
+    expect(css).not.toContain('body.dsh-remote-portrait [class$="_titleCluster"]{flex-wrap:wrap')
+  })
+
   it('paints the header actions over the tabs row without re-parenting the React node', async () => {
     media.portrait = true
     media.coarse = true
