@@ -70,6 +70,12 @@ const WHALE_ID = 'dshRemoteWhale'
 /** Body class while the header actions are seated in the tabs row. */
 const HEADER_SEATED_CLASS = 'dsh-remote-header-seated'
 /**
+ * Body class while the header actions hold a bulky row (more buttons than the
+ * stock chips carry). The row stays in the title cluster and wraps there
+ * instead of being painted over the tabs row (see holdsBulkyActionRow).
+ */
+const HEADER_STACKED_CLASS = 'dsh-remote-header-actions-stacked'
+/**
  * Width the seated header actions paint over the tabs row, as a CSS variable
  * on <html>. The row caps its own width with it (see the v80 rules) instead of
  * reserving the space with padding.
@@ -265,6 +271,15 @@ const ADAPT_CSS: readonly string[] = [
   // title row keeps its own layout and React keeps owning the node) and
   // painted over the tabs row by the transform alignActionsText computes.
   `body.${HEADER_SEATED_CLASS} [class$="_header"] [class$="_titleCluster"] [class$="_headerActions"]{position:absolute;left:0;top:0;margin:0;display:flex;align-items:center;gap:6px;flex:none;z-index:2}`,
+  // v82: plugins inject full action rows (archive / star / history / labels /
+  // move / delete, …) into the same `_headerActions` slot the seat was sized
+  // for. Painting one of those over the tabs row floats it mid-page: every
+  // ancestor of the slot is position:static, so the slot's offsetParent is the
+  // app root and the seat transform lands wherever the root math says. While
+  // the slot holds a bulky row (holdsBulkyActionRow) the seat is skipped and
+  // the row wraps inside the title cluster instead.
+  `body.${HEADER_STACKED_CLASS} [class$="_header"] [class$="_titleCluster"]{flex-wrap:wrap;row-gap:4px}`,
+  `body.${HEADER_STACKED_CLASS} [class$="_header"] [class$="_titleCluster"] [class$="_headerActions"]{flex:1 0 100%;max-width:100%;min-width:0;flex-wrap:wrap;justify-content:flex-start;row-gap:4px}`,
   // v70: match the tab text size with the seated mode label (12px); NB
   // [class$="_tab"] misses the active tab (its class ends in "_tabActive")
   // — containment so BOTH tabs match.
@@ -848,9 +863,31 @@ export function startMobileAdapt(): void {
     // child of the recorded parent (a NotFoundError in the commit phase). The
     // injected CSS takes it out of flow and the transform below paints it over
     // the tabs row instead.
-    const seated = header !== null && tabs !== null && actions !== null
+    // A slot carrying a bulky plugin row is left in the title cluster: the
+    // seat's offsetParent math only works for the two stock chips, and a full
+    // button row painted through it floats mid-page (v82).
+    const bulky = actions !== null && holdsBulkyActionRow(actions)
+    const seated = header !== null && tabs !== null && actions !== null && !bulky
     document.body.classList.toggle(HEADER_SEATED_CLASS, seated)
+    document.body.classList.toggle(HEADER_STACKED_CLASS, bulky)
+    if (!seated) clearSeatOffsets(actions)
     ensureHeaderObserver(seated ? header : null)
+  }
+
+  /**
+   * Whether the header-actions slot holds more than the stock chips (the
+   * agent-preset mode label plus the background-task badge, two buttons at
+   * most). Anything larger — a plugin's full session-action row — must not be
+   * seated over the tabs row; it wraps inside the title cluster instead.
+   */
+  function holdsBulkyActionRow(actions: Element): boolean {
+    return actions.querySelectorAll('button').length > 2
+  }
+
+  /** Drop the seat paint (transform + width reserve) for an unseated slot. */
+  function clearSeatOffsets(actions: Element | null): void {
+    if (actions instanceof HTMLElement && actions.style.transform !== '') actions.style.transform = ''
+    if (document.documentElement.style.getPropertyValue(HEADER_RESERVE_VAR) !== '') document.documentElement.style.removeProperty(HEADER_RESERVE_VAR)
   }
 
   // Paint the mode/badge over the tabs row: the actions keep their DOM slot in
@@ -866,6 +903,12 @@ export function startMobileAdapt(): void {
     const tabs = header.querySelector('[class$="_tabs"]')
     const actions = header.querySelector('[class$="_titleCluster"] [class$="_headerActions"]')
     if (tabs === null || actions === null || !(tabs instanceof HTMLElement) || !(actions instanceof HTMLElement)) return
+    // A bulky plugin row is never seated, so there is nothing to align and any
+    // transform left over from a previous seat would paint it mid-page (v82).
+    if (holdsBulkyActionRow(actions)) {
+      clearSeatOffsets(actions)
+      return
+    }
     if (!headerGeometryDirty) return
     headerGeometryDirty = false
     const tabBtn = tabs.querySelector(':scope > [class*="_tab"]')
@@ -921,6 +964,7 @@ export function startMobileAdapt(): void {
 
   function unseatHeaderActions(): void {
     document.body.classList.remove(HEADER_SEATED_CLASS)
+    document.body.classList.remove(HEADER_STACKED_CLASS)
     document.documentElement.style.removeProperty(HEADER_RESERVE_VAR)
     const header = document.querySelector('[class$="_header"]')
     const tabs = header !== null ? header.querySelector('[class$="_tabs"]') : null
